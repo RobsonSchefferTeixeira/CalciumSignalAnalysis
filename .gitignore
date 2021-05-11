@@ -2,3 +2,5 @@ logs/
 main.logs
 *.log
 *.pdf
+.python-version
+.ipynb_checkpoints/
