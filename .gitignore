@@ -4,3 +4,4 @@ main.logs
 *.pdf
 .python-version
 .ipynb_checkpoints/
+__pycache__/
