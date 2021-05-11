@@ -1,0 +1,4 @@
+logs/
+main.logs
+*.log
+*.pdf

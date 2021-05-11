@@ -46,9 +46,8 @@ def generate_randomWalk(input_srate = 100.,input_total_Time = 500,rho1  = 1.,sig
         else:
             x_coordinate[t] = x_coordinate[t-1]    
 
-    x_coordinate = imbf.smooth(np.squeeze(x_coordinate),int(smooth_coeff*srate))
-    y_coordinate = imbf.smooth(np.squeeze(y_coordinate),int(smooth_coeff*srate))
-
+    x_coordinate = smooth(np.squeeze(x_coordinate),int(smooth_coeff*srate))
+    y_coordinate = smooth(np.squeeze(y_coordinate),int(smooth_coeff*srate))
 
     timevector = np.linspace(0,total_points/srate,total_points)
     dt = 1/srate
@@ -58,6 +57,66 @@ def generate_randomWalk(input_srate = 100.,input_total_Time = 500,rho1  = 1.,sig
 
 
     return x_coordinate,y_coordinate,speed,timevector
+
+
+def smooth(x,window_len=11,window='hanning'):
+    
+    """smooth the data using a window with requested size.
+    
+    This method is based on the convolution of a scaled window with the signal.
+    The signal is prepared by introducing reflected copies of the signal 
+    (with the window size) in both ends so that transient parts are minimized
+    in the begining and end part of the output signal.
+    
+    input:
+        x: the input signal 
+        window_len: the dimension of the smoothing window; should be an odd integer
+        window: the type of window from 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
+            flat window will produce a moving average smoothing.
+
+    output:
+        the smoothed signal
+        
+    example:
+
+    t=linspace(-2,2,0.1)
+    x=sin(t)+randn(len(t))*0.1
+    y=smooth(x)
+    
+    see also: 
+    
+    numpy.hanning, numpy.hamming, numpy.bartlett, numpy.blackman, numpy.convolve
+    scipy.signal.lfilter
+ 
+    TODO: the window parameter could be the window itself if an array instead of a string
+    NOTE: length(output) != length(input), to correct this: return y[(window_len/2-1):-(window_len/2)] instead of just y.
+    """
+
+    if x.ndim != 1:
+        raise ValueError("smooth only accepts 1 dimension arrays.")
+
+    if x.size < window_len:
+        raise ValueError("Input vector needs to be bigger than window size.")
+
+
+    if window_len<3:
+        return x
+
+
+    if not window in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
+        raise ValueError("Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'")
+
+
+    s=np.r_[x[window_len-1:0:-1],x,x[-2:-window_len-1:-1]]
+    #print(len(s))
+    if window == 'flat': #moving average
+        w=np.ones(window_len,'d')
+    else:
+        w=eval('np.'+window+'(window_len)')
+
+    y=np.convolve(w/w.sum(),s,mode='valid')
+    return y[int(window_len/2-1):-int(window_len/2)]
+
 
 def generate_randomWalk2(input_srate = 100.,input_total_Time = 500,heading_srate = 10., speed_srate = 5., rho1  = 1.,sigma = 0.02,mu_e  = 0.,smooth_coeff = 0.5):
     
@@ -123,13 +182,11 @@ def generate_randomWalk2(input_srate = 100.,input_total_Time = 500,heading_srate
 
 
 
-    x_coordinate = imbf.smooth(np.squeeze(x_coordinate),int(smooth_coeff*srate))
-    y_coordinate = imbf.smooth(np.squeeze(y_coordinate),int(smooth_coeff*srate))
+    x_coordinate = smooth(np.squeeze(x_coordinate),int(smooth_coeff*srate))
+    y_coordinate = smooth(np.squeeze(y_coordinate),int(smooth_coeff*srate))
     
-#     x_coordinate = (x_coordinate - np.min(x_coordinate))/(np.max(x_coordinate)-np.min(x_coordinate))
-#     y_coordinate = (y_coordinate - np.min(y_coordinate))/(np.max(y_coordinate)-np.min(y_coordinate))
 
-#     timevector = np.linspace(0,total_Time,total_points)
+    timevector = np.linspace(0,total_Time,total_points)
     dt = 1/srate
     speed = np.sqrt(np.diff(x_coordinate)**2 + np.diff(y_coordinate)**2) / dt
     speed = np.hstack([speed,0])
@@ -202,15 +259,15 @@ def generate_arrivals(_lambda = 0.5,total_Time=100):
 
 def get_bins_edges(x_coordinate,y_coordinate,x_nbins,y_nbins):
     
-    x_bins = np.linspace(np.nanmin(x_coordinate),np.nanmax(x_coordinate),nbins_x)
-    y_bins = np.linspace(np.nanmin(y_coordinate),np.nanmax(y_coordinate),nbins_y)
+    x_bins = np.linspace(np.nanmin(x_coordinate),np.nanmax(x_coordinate),x_nbins)
+    y_bins = np.linspace(np.nanmin(y_coordinate),np.nanmax(y_coordinate),y_nbins)
     
     return x_bins,y_bins
 
-def gaussian_kernel_2d(x_coordinate,y_coordinate,nbins_x=100,nbins_y=100,x_center = 0.5,y_center = 0.5, s = 0.1):
+def gaussian_kernel_2d(x_coordinate,y_coordinate,x_nbins=100,y_nbins=100,x_center = 0.5,y_center = 0.5, s = 0.1):
     x_bins,y_bins = get_bins_edges(x_coordinate,y_coordinate,x_nbins,y_nbins)
     
-    gaussian_kernel = np.zeros([ybins.shape[0],xbins.shape[0]])
+    gaussian_kernel = np.zeros([y_bins.shape[0],x_bins.shape[0]])
     x_count = 0
     for xx in x_bins:
         y_count = 0
