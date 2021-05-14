@@ -55,16 +55,18 @@ def run_placeMetrics(RatSession,day,ch,saving_path,dataset,mean_calcium_to_behav
         
     return inputdict
 
-
+def get_speed(x_coordinates,y_coordinates,track_timevector):
+    
+    speed = np.sqrt(np.diff(x_coordinates)**2 + np.diff(y_coordinates)**2)
+    speed = hf.smooth(speed/np.diff(track_timevector),window_len=10)
+    speed = np.hstack([speed,0])
+    return speed
 
 
 
 def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_behavior,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y):
 
-
-    speed = np.sqrt(np.diff(x_coordinates)**2 + np.diff(y_coordinates)**2)
-    speed = hf.smooth(speed/np.diff(track_timevector),window_len=10)
-    speed = np.hstack([speed,0])
+    speed = get_speed(x_coordinates,y_coordinates,track_timevector)
 
     I_speed_thres = speed > speed_threshold
 
