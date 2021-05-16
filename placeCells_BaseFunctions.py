@@ -7,11 +7,6 @@ import helper_functions as hf
 import detect_peaks as dp
 from joblib import Parallel, delayed
 
-# to implement
-# def get_speed
-# def get_position_binned
-# def get_occupancy_map
-# def get_visits_map
 
 def run_placeMetrics(RatSession,day,ch,saving_path,dataset,mean_calcium_to_behavior,track_timevector,x_coordinates,y_coordinates,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y,nbins_cal,placefield_nbins_pos_x,placefield_nbins_pos_y,num_cores,num_surrogates,saving = False,saving_string = 'CI'):
     
@@ -64,6 +59,19 @@ def get_speed(x_coordinates,y_coordinates,track_timevector):
 
 
 
+
+def get_position_grid(x_coordinates,y_coordinates):
+    
+    x_range = (np.nanmax(x_coordinates) - np.nanmin(x_coordinates))
+    x_grid_window = x_range/nbins_pos_x
+    x_grid = np.arange(np.nanmin(x_coordinates),np.nanmax(x_coordinates) +x_grid_window/2,x_grid_window)
+    
+    y_range = (np.nanmax(y_coordinates) - np.nanmin(y_coordinates))
+    y_grid_window = y_range/nbins_pos_y
+    y_grid = np.arange(np.nanmin(y_coordinates),np.nanmax(y_coordinates)+y_grid_window/2,y_grid_window)
+
+    return x_grid,y_grid
+
 def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_behavior,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y):
 
     speed = get_speed(x_coordinates,y_coordinates,track_timevector)
@@ -74,14 +82,8 @@ def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_beha
     x_coordinates_speed = x_coordinates[I_speed_thres]
     y_coordinates_speed = y_coordinates[I_speed_thres]
     
-    x_range = (np.nanmax(x_coordinates) - np.nanmin(x_coordinates))
-    x_grid_window = x_range/nbins_pos_x
-    x_grid = np.arange(np.nanmin(x_coordinates),np.nanmax(x_coordinates) +x_grid_window/2,x_grid_window)
+    x_grid,y_grid = get_position_grid(x_coordinates,y_coordinates)
     
-    y_range = (np.nanmax(y_coordinates) - np.nanmin(y_coordinates))
-    y_grid_window = y_range/nbins_pos_y
-    y_grid = np.arange(np.nanmin(y_coordinates),np.nanmax(y_coordinates)+y_grid_window/2,y_grid_window)
-
     # calculate position occupancy
     position_occupancy = np.zeros((y_grid.shape[0]-1,x_grid.shape[0]-1))   
     for xx in range(0,x_grid.shape[0]-1):
