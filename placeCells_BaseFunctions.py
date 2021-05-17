@@ -46,7 +46,7 @@ def run_placeMetrics(RatSession,day,ch,saving_path,dataset,mean_calcium_to_behav
         np.save(output,inputdict)
         output.close()
     else:
-        print('File nor saved!')
+        print('File not saved!')
         
     return inputdict
 
@@ -60,7 +60,8 @@ def get_speed(x_coordinates,y_coordinates,track_timevector):
 
 
 
-def get_position_grid(x_coordinates,y_coordinates):
+def get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y):
+    # here someone should also be able to set the enviroment edges
     
     x_range = (np.nanmax(x_coordinates) - np.nanmin(x_coordinates))
     x_grid_window = x_range/nbins_pos_x
@@ -69,23 +70,16 @@ def get_position_grid(x_coordinates,y_coordinates):
     y_range = (np.nanmax(y_coordinates) - np.nanmin(y_coordinates))
     y_grid_window = y_range/nbins_pos_y
     y_grid = np.arange(np.nanmin(y_coordinates),np.nanmax(y_coordinates)+y_grid_window/2,y_grid_window)
-
-    return x_grid,y_grid
-
-def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_behavior,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y):
-
-    speed = get_speed(x_coordinates,y_coordinates,track_timevector)
-
-    I_speed_thres = speed > speed_threshold
-
-    mean_calcium_to_behavior_speed = mean_calcium_to_behavior[I_speed_thres]
-    x_coordinates_speed = x_coordinates[I_speed_thres]
-    y_coordinates_speed = y_coordinates[I_speed_thres]
     
-    x_grid,y_grid = get_position_grid(x_coordinates,y_coordinates)
-    
+    x_center_bins = x_grid + x_grid_window/2
+    y_center_bins = y_grid + y_grid_window/2
+
+    return x_grid,y_grid,x_center_bins,y_center_bins
+
+
+def get_occupancy(x_coordinates_speed,y_coordinates_speed,x_grid,y_grid,mean_video_srate):
     # calculate position occupancy
-    position_occupancy = np.zeros((y_grid.shape[0]-1,x_grid.shape[0]-1))   
+    position_occupancy = np.zeros((y_grid.shape[0]-1,x_grid.shape[0]-1))
     for xx in range(0,x_grid.shape[0]-1):
         for yy in range(0,y_grid.shape[0]-1):
 
@@ -94,7 +88,11 @@ def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_beha
 
             position_occupancy[yy,xx] = np.sum(np.logical_and(check_x_ocuppancy,check_y_ocuppancy))/mean_video_srate
 
-            
+    return position_occupancy
+
+   
+def get_calcium_occupancy(mean_calcium_to_behavior_speed,x_coordinates_speed,y_coordinates_speed,x_grid,y_grid):
+
     # calculate mean calcium per pixel
     calcium_mean_occupancy = np.nan*np.zeros((y_grid.shape[0]-1,x_grid.shape[0]-1)) 
     for xx in range(0,x_grid.shape[0]-1):
@@ -105,43 +103,64 @@ def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_beha
 
             calcium_mean_occupancy[yy,xx] = np.nanmean(mean_calcium_to_behavior_speed[np.logical_and(check_x_ocuppancy,check_y_ocuppancy)])
 
-            
-    x_center_bins = x_grid + x_grid_window/2
-    y_center_bins = y_grid + y_grid_window/2
-
-    I_x_coord = []
-    I_y_coord = []
-
-    for xx in range(0,x_coordinates.shape[0]):
-        I_x_coord.append(np.argmin(np.abs(x_coordinates[xx] - x_center_bins)))
-        I_y_coord.append(np.argmin(np.abs(y_coordinates[xx] - y_center_bins)))
-
-    I_x_coord = np.array(I_x_coord)
-    I_y_coord = np.array(I_y_coord)
-
-    dx = np.diff(np.hstack([I_x_coord[0]-1,I_x_coord]))
-    dy = np.diff(np.hstack([I_y_coord[0]-1,I_y_coord]))
-
-    newvisitstimes = (-1*(dy == 0))*(dx==0)+1
-    newvisitstimes2 = (np.logical_or((dy != 0), (dx!=0))*1)
-
-    I_visit = np.where(newvisitstimes>0)[0]
-
-    # calculate visits
+    return calcium_mean_occupancy
 
 
-    x_coordinate_visit = x_coordinates[I_visit]
-    y_coordinate_visit = y_coordinates[I_visit]
+def get_visits(x_coordinates,y_coordinates,x_grid,y_grid,x_center_bins,y_center_bins):
+    
+        I_x_coord = []
+        I_y_coord = []
 
-    visits_occupancy = np.zeros((y_grid.shape[0]-1,x_grid.shape[0]-1))        
-    for xx in range(0,x_grid.shape[0]-1):
-        for yy in range(0,y_grid.shape[0]-1):
+        for xx in range(0,x_coordinates.shape[0]):
+            I_x_coord.append(np.argmin(np.abs(x_coordinates[xx] - x_center_bins)))
+            I_y_coord.append(np.argmin(np.abs(y_coordinates[xx] - y_center_bins)))
 
-            check_x_ocuppancy = np.logical_and(x_coordinate_visit >= x_grid[xx],x_coordinate_visit < (x_grid[xx+1]))
-            check_y_ocuppancy = np.logical_and(y_coordinate_visit >= y_grid[yy],y_coordinate_visit < (y_grid[yy+1]))
+        I_x_coord = np.array(I_x_coord)
+        I_y_coord = np.array(I_y_coord)
 
-            visits_occupancy[yy,xx] = np.sum(np.logical_and(check_x_ocuppancy,check_y_ocuppancy))
+        dx = np.diff(np.hstack([I_x_coord[0]-1,I_x_coord]))
+        dy = np.diff(np.hstack([I_y_coord[0]-1,I_y_coord]))
 
+        newvisitstimes = (-1*(dy == 0))*(dx==0)+1
+        newvisitstimes2 = (np.logical_or((dy != 0), (dx!=0))*1)
+
+        I_visit = np.where(newvisitstimes>0)[0]
+
+        # calculate visits
+
+
+        x_coordinate_visit = x_coordinates[I_visit]
+        y_coordinate_visit = y_coordinates[I_visit]
+
+        visits_occupancy = np.zeros((y_grid.shape[0]-1,x_grid.shape[0]-1))        
+        for xx in range(0,x_grid.shape[0]-1):
+            for yy in range(0,y_grid.shape[0]-1):
+
+                check_x_ocuppancy = np.logical_and(x_coordinate_visit >= x_grid[xx],x_coordinate_visit < (x_grid[xx+1]))
+                check_y_ocuppancy = np.logical_and(y_coordinate_visit >= y_grid[yy],y_coordinate_visit < (y_grid[yy+1]))
+
+                visits_occupancy[yy,xx] = np.sum(np.logical_and(check_x_ocuppancy,check_y_ocuppancy))
+
+        return visits_occupancy
+    
+def placeField(track_timevector,x_coordinates,y_coordinates,mean_calcium_to_behavior,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y):
+
+    speed = get_speed(x_coordinates,y_coordinates,track_timevector)
+
+    I_speed_thres = speed > speed_threshold
+
+    mean_calcium_to_behavior_speed = mean_calcium_to_behavior[I_speed_thres]
+    x_coordinates_speed = x_coordinates[I_speed_thres]
+    y_coordinates_speed = y_coordinates[I_speed_thres]
+    
+    x_grid,y_grid,x_center_bins,y_center_bins = get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
+    
+    position_occupancy = get_occupancy(x_coordinates_speed,y_coordinates_speed,x_grid,y_grid,mean_video_srate)
+   
+    calcium_mean_occupancy = get_calcium_occupancy(mean_calcium_to_behavior_speed,x_coordinates_speed,y_coordinates_speed,x_grid,y_grid)
+    
+    visits_occupancy = get_visits(x_coordinates,y_coordinates,x_grid,y_grid,x_center_bins,y_center_bins)
+    
 
     Valid=(position_occupancy>=mintimespent)*(visits_occupancy>=minvisits)*1.
     Valid[Valid == 0] = np.nan
