@@ -8,13 +8,6 @@ import detect_peaks as dp
 from joblib import Parallel, delayed
 
 
-# valid_kwargs = ['x', 'y', 'z']
-#     for k, v in kwargs.iteritems():
-#         if k not in valid_kwargs:
-#             raise TypeError("Invalid keyword argument %s" % k)
-#         setattr(self, k, v)
-        
-        
         
 class PlaceCell:
     def __init__(self,**kwargs):
@@ -61,9 +54,14 @@ class PlaceCell:
 
         calcium_signal_binned_signal,position_binned = self.get_binned_signals(self.mean_calcium_to_behavior,self.x_coordinates,self.y_coordinates,self.speed,self.speed_threshold,self.nbins_pos_x,self.nbins_pos_y,self.nbins_cal)
 
+        self.nbins_pos = self.nbins_pos_x*self.nbins_pos_y
+        
+        mutualInfo_original = self.mutualInformation(position_binned,calcium_signal_binned_signal,self.nbins_pos,self.nbins_cal)
+        
+        mutualInfo_permutation = self.get_perm_distribution(position_binned,calcium_signal_binned_signal,self.nbins_pos,self.nbins_cal,self.num_cores,self.num_surrogates)
 
-        mutualInfo,entropy1,entropy2,joint_entropy,mutualInfo_distance,perm_mutual_information = self.mutualInformation(calcium_signal_binned_signal,position_binned,self.num_surrogates,self.num_cores,self.nbins_pos_x,self.nbins_pos_y,self.nbins_cal)
-
+        mutualInfo_zscored = self.get_mutualInfo_zscore(mutualInfo_original,mutualInfo_permutation)
+        
 
 
         inputdict = dict()
@@ -74,9 +72,9 @@ class PlaceCell:
         inputdict['y_grid'] = y_grid
         inputdict['numb_events'] = I_peaks.shape[0]
         inputdict['events_index'] = I_peaks
-        inputdict['MutualInfo'] = mutualInfo
-        inputdict['MutualInfo_Zscored'] = mutualInfo_distance
-        inputdict['Shuffled_MutualInfo'] = perm_mutual_information
+        inputdict['mutualInfo_original'] = mutualInfo_original
+        inputdict['mutualInfo_zscored'] = mutualInfo_zscored
+        inputdict['mutualInfo_permutation'] = mutualInfo_permutation
 
         self.caller_saving(inputdict,self.saving)
 
@@ -101,7 +99,6 @@ class PlaceCell:
         speed = hf.smooth(speed/np.diff(track_timevector),window_len=10)
         speed = np.hstack([speed,0])
         return speed
-
 
 
 
@@ -188,6 +185,28 @@ class PlaceCell:
 
             return visits_occupancy
 
+    def get_valid_timepoints(self,mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector):
+        
+        speed = self.get_speed(x_coordinates,y_coordinates,track_timevector)
+
+        I_speed_thres = speed > speed_threshold
+
+        mean_calcium_to_behavior_speed = mean_calcium_to_behavior[I_speed_thres].copy()
+        x_coordinates_speed = x_coordinates[I_speed_thres].copy()
+        y_coordinates_speed = y_coordinates[I_speed_thres].copy()
+        track_timevector_valid = track_timevector[I_speed_thres].copy()
+        
+        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
+
+        position_occupancy = self.get_occupancy(x_coordinates_speed,y_coordinates_speed,x_grid,y_grid,mean_video_srate)
+
+        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior_speed,x_coordinates_speed,y_coordinates_speed,x_grid,y_grid)
+
+        visits_occupancy = self.get_visits(x_coordinates,y_coordinates,x_grid,y_grid,x_center_bins,y_center_bins)
+
+        
+        return x_coordinates_valid, y_coordinates_valid, mean_calcium_to_behavior_valid, track_timevector_valid
+    
     def placeField(self,track_timevector,x_coordinates,y_coordinates,mean_calcium_to_behavior,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y):
 
         speed = self.get_speed(x_coordinates,y_coordinates,track_timevector)
@@ -229,12 +248,6 @@ class PlaceCell:
         y_coordinates_speed = np.copy(y_coordinates[I_speed_thres])
 
 
-    #     this part here could be done using this code instead. I will leave both for clarity
-    #     nbins_cal = 10
-    #     edges = np.linspace(np.nanmin(mean_calcium_to_behavior),np.nanmax(mean_calcium_to_behavior),nbins_cal)
-    #     bin_vector = np.digitize(mean_calcium_to_behavior,edges)-1
-
-    #     calcium_signal_bins = np.arange(0,1+1/nbins_cal,1/nbins_cal)
         calcium_signal_bins = np.linspace(np.nanmin(mean_calcium_to_behavior_speed),np.nanmax(mean_calcium_to_behavior_speed),nbins_cal+1)
         calcium_signal_binned_signal = np.zeros(mean_calcium_to_behavior_speed.shape[0])
         for jj in range(calcium_signal_bins.shape[0]-1):
@@ -242,14 +255,7 @@ class PlaceCell:
             calcium_signal_binned_signal[I_amp] = jj
 
 
-        x_range = (np.nanmax(x_coordinates) - np.nanmin(x_coordinates))
-        x_grid_window = x_range/nbins_pos_x
-        x_grid = np.arange(np.nanmin(x_coordinates),np.nanmax(x_coordinates) +x_grid_window/2,x_grid_window)
-
-        y_range = (np.nanmax(y_coordinates) - np.nanmin(y_coordinates))
-        y_grid_window = y_range/nbins_pos_y
-        y_grid = np.arange(np.nanmin(y_coordinates),np.nanmax(y_coordinates)+y_grid_window/2,y_grid_window)
-
+        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
 
         # calculate position occupancy
         position_binned = np.zeros(x_coordinates_speed.shape) 
@@ -266,18 +272,14 @@ class PlaceCell:
 
         return calcium_signal_binned_signal,position_binned
 
-    def mutualInformation(self,calcium_signal_binned_signal,position_binned,num_surrogates,num_cores,nbins_pos_x,nbins_pos_y,nbins_cal):
+    
 
+        
+    def mutualInformation(self,bin_vector1,bin_vector2,nbins_1,nbins_2):
         eps = np.finfo(float).eps
 
-        nbins_pos = nbins_pos_x*nbins_pos_y
-        hdat1 = np.histogram(position_binned,nbins_pos)[0]
-        hdat1 = hdat1/np.nansum(hdat1)
-        entropy1 = -np.nansum(hdat1*np.log2(hdat1+eps))
-
-        hdat2 = np.histogram(calcium_signal_binned_signal,nbins_cal)[0]
-        hdat2 = hdat2/np.nansum(hdat2)
-        entropy2 = -np.nansum(hdat2*np.log2(hdat2+eps))
+        entropy1 = self.get_entropy(bin_vector1,nbins_1)
+        entropy2 = self.get_entropy(bin_vector2,nbins_2)
 
     #     this part here could be done using this code instead. I will leave both for clarity
     #     nbins_pos = 100
@@ -288,31 +290,54 @@ class PlaceCell:
     #     edges2 = np.linspace(np.nanmin(calcium_signal_binned_signal),np.nanmax(calcium_signal_binned_signal),nbins_cal+1)
     #     bin_vector2 = np.digitize(calcium_signal_binned_signal,edges2)-1
 
+        joint_entropy = self.get_joint_entropy(bin_vector1,bin_vector2,nbins_1,nbins_2)
+        mutualInfo = entropy1 + entropy2 - joint_entropy
 
+        return mutualInfo
 
-        bin_vector1 = np.copy(position_binned)
-        bin_vector2 = np.copy(calcium_signal_binned_signal)
+    def get_mutualInfo_zscore(self,mutualInfo_original,mutualInfo_permutation):
+        mutualInfo_zscored = (mutualInfo_original-np.nanmean(mutualInfo_permutation))/np.nanstd(mutualInfo_permutation)
+        return mutualInfo_zscored
 
-        jointprobs = np.zeros([nbins_pos,nbins_cal])
-        for i1 in range(nbins_pos):
-            for i2 in range(nbins_cal):
+    def get_perm_distribution(self,bin_vector1,bin_vector2,nbins_1,nbins_2,num_cores,num_surrogates):
+        
+        results = Parallel(n_jobs=num_cores)(delayed(self.get_surrogate)(bin_vector1,bin_vector2,nbins_1,nbins_2,permi) for permi in range(num_surrogates))
+        
+        return np.array(results)
+    
+    
+    def get_joint_entropy(self,bin_vector1,bin_vector2,nbins_1,nbins_2):
+
+        eps = np.finfo(float).eps
+
+        bin_vector1 = np.copy(bin_vector1)
+        bin_vector2 = np.copy(bin_vector2)
+
+        jointprobs = np.zeros([nbins_1,nbins_2])
+        
+        for i1 in range(nbins_1):
+            for i2 in range(nbins_2):
                 jointprobs[i1,i2] = np.nansum((bin_vector1==i1) & (bin_vector2==i2))
 
         jointprobs = jointprobs/np.nansum(jointprobs)
         joint_entropy = -np.nansum(jointprobs*np.log2(jointprobs+eps));
 
-        mutualInfo = entropy1 + entropy2 - joint_entropy
+        return joint_entropy
+    
+    
+    
+    def get_entropy(self,binned_input,nbins):
 
-        results = Parallel(n_jobs=num_cores)(delayed(self.processInput_mutualInformation)(bin_vector1,bin_vector2,entropy1,entropy2,permi,nbins_pos,nbins_cal) for permi in range(num_surrogates))
-        perm_mutual_information = np.array(results)
+        eps = np.finfo(float).eps
 
-        mutualInfo_distance = (mutualInfo-np.nanmean(perm_mutual_information))/np.nanstd(perm_mutual_information)
+        hdat = np.histogram(binned_input,nbins)[0]
+        hdat = hdat/np.nansum(hdat)
+        entropy = -np.nansum(hdat*np.log2(hdat+eps))
 
-        return mutualInfo,entropy1,entropy2,joint_entropy,mutualInfo_distance,perm_mutual_information
+        return entropy
 
-
-
-    def processInput_mutualInformation(self,bin_vector1,bin_vector2,entropy1,entropy2,permi,nbins_pos,nbins_cal):
+    
+    def get_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,permi):
         eps = np.finfo(float).eps
 
         bin_vector_shuffled = []
@@ -329,13 +354,7 @@ class PlaceCell:
             bin_vector_shuffled = bin_vector_shuffled[::-1]
 
 
-        jointprobs = np.zeros([nbins_pos,nbins_cal])
-        for i1 in range(nbins_pos):
-            for i2 in range(nbins_cal):
-                jointprobs[i1,i2] = np.nansum((bin_vector_shuffled==i2) & (bin_vector1==i1))
+        mutualInfo = self.mutualInformation(bin_vector1,bin_vector_shuffled,nbins_1,nbins_2)
 
-        jointprobs = jointprobs/np.nansum(jointprobs)
-        perm_joint_entropy = -np.nansum(jointprobs*np.log2(jointprobs+eps))
-        perm_mutual_information = entropy1 + entropy2 - perm_joint_entropy
 
-        return perm_mutual_information
+        return mutualInfo
