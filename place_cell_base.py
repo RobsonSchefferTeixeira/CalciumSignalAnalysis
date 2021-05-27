@@ -49,10 +49,13 @@ class PlaceCell:
         
         I_peaks = dp.detect_peaks(self.mean_calcium_to_behavior,mpd=0.5*self.mean_video_srate,mph=1.*np.nanstd(self.mean_calcium_to_behavior))
 
-        calcium_mean_occupancy,calcium_mean_occupancy_smoothed,x_grid,y_grid,position_occupancy,visits_occupancy,speed = self.placeField(self.track_timevector,self.x_coordinates,self.y_coordinates,self.mean_calcium_to_behavior,self.mean_video_srate,self.mintimespent, self.minvisits,self.speed_threshold,self.placefield_nbins_pos_x,self.placefield_nbins_pos_y)
+        x_coordinates_valid, y_coordinates_valid, mean_calcium_to_behavior_valid, track_timevector_valid = self.get_valid_timepoints(mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector,self.speed_threshold)
 
+        calcium_signal_binned_signal = self.get_binned_signal(mean_calcium_to_behavior_valid,self.nbins_cal)
 
-        calcium_signal_binned_signal,position_binned = self.get_binned_signals(self.mean_calcium_to_behavior,self.x_coordinates,self.y_coordinates,self.speed,self.speed_threshold,self.nbins_pos_x,self.nbins_pos_y,self.nbins_cal)
+        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,self.nbins_pos_x,self.nbins_pos_y)
+
+        position_binned = self.get_binned_2Dposition(x_coordinates_valid,y_coordinates_valid,self.nbins_pos_x,self.nbins_pos_y)
 
         self.nbins_pos = self.nbins_pos_x*self.nbins_pos_y
         
@@ -62,14 +65,17 @@ class PlaceCell:
 
         mutualInfo_zscored = self.get_mutualInfo_zscore(mutualInfo_original,mutualInfo_permutation)
         
-
+        calcium_mean_occupancy,calcium_mean_occupancy_smoothed,position_occupancy,visits_occupancy,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc = self.placeField(mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,track_timevector_valid,self.mean_video_srate,self.mintimespent,self.minvisits,self.placefield_nbins_pos_x,self.placefield_nbins_pos_y)
+        
 
         inputdict = dict()
         inputdict['signalMap'] = calcium_mean_occupancy
         inputdict['signalMapSmoothed'] = calcium_mean_occupancy_smoothed
         inputdict['ocuppancyMap'] = position_occupancy
-        inputdict['x_grid'] = x_grid
-        inputdict['y_grid'] = y_grid
+        inputdict['x_grid'] = x_grid_pc
+        inputdict['y_grid'] = y_grid_pc
+        inputdict['x_center_bins'] = x_center_bins_pc
+        inputdict['y_center_bins'] = y_center_bins_pc          
         inputdict['numb_events'] = I_peaks.shape[0]
         inputdict['events_index'] = I_peaks
         inputdict['mutualInfo_original'] = mutualInfo_original
@@ -185,43 +191,29 @@ class PlaceCell:
 
             return visits_occupancy
 
-    def get_valid_timepoints(self,mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector):
+        
+    def get_valid_timepoints(self,mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector,speed_threshold):
         
         speed = self.get_speed(x_coordinates,y_coordinates,track_timevector)
 
         I_speed_thres = speed > speed_threshold
 
-        mean_calcium_to_behavior_speed = mean_calcium_to_behavior[I_speed_thres].copy()
-        x_coordinates_speed = x_coordinates[I_speed_thres].copy()
-        y_coordinates_speed = y_coordinates[I_speed_thres].copy()
+        mean_calcium_to_behavior_valid = mean_calcium_to_behavior[I_speed_thres].copy()
+        x_coordinates_valid = x_coordinates[I_speed_thres].copy()
+        y_coordinates_valid = y_coordinates[I_speed_thres].copy()
         track_timevector_valid = track_timevector[I_speed_thres].copy()
         
-        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
-
-        position_occupancy = self.get_occupancy(x_coordinates_speed,y_coordinates_speed,x_grid,y_grid,mean_video_srate)
-
-        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior_speed,x_coordinates_speed,y_coordinates_speed,x_grid,y_grid)
-
-        visits_occupancy = self.get_visits(x_coordinates,y_coordinates,x_grid,y_grid,x_center_bins,y_center_bins)
-
         
         return x_coordinates_valid, y_coordinates_valid, mean_calcium_to_behavior_valid, track_timevector_valid
-    
-    def placeField(self,track_timevector,x_coordinates,y_coordinates,mean_calcium_to_behavior,mean_video_srate,mintimespent, minvisits,speed_threshold,nbins_pos_x,nbins_pos_y):
+  
+    def placeField(self,mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector,mean_video_srate,mintimespent, minvisits,placefield_nbins_pos_x,placefield_nbins_pos_y):
 
-        speed = self.get_speed(x_coordinates,y_coordinates,track_timevector)
 
-        I_speed_thres = speed > speed_threshold
+        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,placefield_nbins_pos_x,placefield_nbins_pos_y)
 
-        mean_calcium_to_behavior_speed = mean_calcium_to_behavior[I_speed_thres]
-        x_coordinates_speed = x_coordinates[I_speed_thres]
-        y_coordinates_speed = y_coordinates[I_speed_thres]
+        position_occupancy = self.get_occupancy(x_coordinates,y_coordinates,x_grid,y_grid,mean_video_srate)
 
-        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
-
-        position_occupancy = self.get_occupancy(x_coordinates_speed,y_coordinates_speed,x_grid,y_grid,mean_video_srate)
-
-        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior_speed,x_coordinates_speed,y_coordinates_speed,x_grid,y_grid)
+        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior,x_coordinates,y_coordinates,x_grid,y_grid)
 
         visits_occupancy = self.get_visits(x_coordinates,y_coordinates,x_grid,y_grid,x_center_bins,y_center_bins)
 
@@ -234,47 +226,42 @@ class PlaceCell:
         calcium_mean_occupancy_to_smooth[np.isnan(calcium_mean_occupancy_to_smooth)] = 0 
         calcium_mean_occupancy_smoothed = hf.gaussian_smooth_2d(calcium_mean_occupancy_to_smooth,2)
 
-        return calcium_mean_occupancy,calcium_mean_occupancy_smoothed,x_grid,y_grid,position_occupancy,visits_occupancy,speed
+        return calcium_mean_occupancy,calcium_mean_occupancy_smoothed,position_occupancy,visits_occupancy,x_grid,y_grid,x_center_bins,y_center_bins
 
 
 
-
-    def get_binned_signals(self,mean_calcium_to_behavior,x_coordinates,y_coordinates,speed,speed_threshold,nbins_pos_x,nbins_pos_y,nbins_cal):
-
-        I_speed_thres = speed >= speed_threshold
-
-        mean_calcium_to_behavior_speed = np.copy(mean_calcium_to_behavior[I_speed_thres])
-        x_coordinates_speed = np.copy(x_coordinates[I_speed_thres])
-        y_coordinates_speed = np.copy(y_coordinates[I_speed_thres])
-
-
-        calcium_signal_bins = np.linspace(np.nanmin(mean_calcium_to_behavior_speed),np.nanmax(mean_calcium_to_behavior_speed),nbins_cal+1)
-        calcium_signal_binned_signal = np.zeros(mean_calcium_to_behavior_speed.shape[0])
-        for jj in range(calcium_signal_bins.shape[0]-1):
-            I_amp = (mean_calcium_to_behavior_speed > calcium_signal_bins[jj]) & (mean_calcium_to_behavior_speed <= calcium_signal_bins[jj+1])
-            calcium_signal_binned_signal[I_amp] = jj
-
+    def get_binned_2Dposition(self,x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y):
 
         x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
 
         # calculate position occupancy
-        position_binned = np.zeros(x_coordinates_speed.shape) 
+        position_binned = np.zeros(x_coordinates.shape) 
         count = 0
         for xx in range(0,x_grid.shape[0]-1):
             for yy in range(0,y_grid.shape[0]-1):
 
-                check_x_ocuppancy = np.logical_and(x_coordinates_speed >= x_grid[xx],x_coordinates_speed < (x_grid[xx+1]))
-                check_y_ocuppancy = np.logical_and(y_coordinates_speed >= y_grid[yy],y_coordinates_speed < (y_grid[yy+1]))
+                check_x_ocuppancy = np.logical_and(x_coordinates >= x_grid[xx],x_coordinates < (x_grid[xx+1]))
+                check_y_ocuppancy = np.logical_and(y_coordinates >= y_grid[yy],y_coordinates < (y_grid[yy+1]))
 
 
                 position_binned[np.logical_and(check_x_ocuppancy,check_y_ocuppancy)] = count
                 count += 1
 
-        return calcium_signal_binned_signal,position_binned
-
+                
+        return position_binned
     
 
-        
+    def get_binned_signal(self,mean_calcium_to_behavior,nbins_cal):
+
+        calcium_signal_bins = np.linspace(np.nanmin(mean_calcium_to_behavior),np.nanmax(mean_calcium_to_behavior),nbins_cal+1)
+        calcium_signal_binned_signal = np.zeros(mean_calcium_to_behavior.shape[0])
+        for jj in range(calcium_signal_bins.shape[0]-1):
+            I_amp = (mean_calcium_to_behavior > calcium_signal_bins[jj]) & (mean_calcium_to_behavior <= calcium_signal_bins[jj+1])
+            calcium_signal_binned_signal[I_amp] = jj
+
+        return calcium_signal_binned_signal
+
+
     def mutualInformation(self,bin_vector1,bin_vector2,nbins_1,nbins_2):
         eps = np.finfo(float).eps
 
@@ -304,7 +291,6 @@ class PlaceCell:
         results = Parallel(n_jobs=num_cores)(delayed(self.get_surrogate)(bin_vector1,bin_vector2,nbins_1,nbins_2,permi) for permi in range(num_surrogates))
         
         return np.array(results)
-    
     
     def get_joint_entropy(self,bin_vector1,bin_vector2,nbins_1,nbins_2):
 
