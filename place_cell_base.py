@@ -57,21 +57,31 @@ class PlaceCell:
 
         position_binned = self.get_binned_2Dposition(x_coordinates_valid,y_coordinates_valid,self.nbins_pos_x,self.nbins_pos_y)
 
-        self.nbins_pos = self.nbins_pos_x*self.nbins_pos_y
+        nbins_pos = self.nbins_pos_x*self.nbins_pos_y
         
-        mutualInfo_original = self.mutualInformation(position_binned,calcium_signal_binned_signal,self.nbins_pos,self.nbins_cal)
+        mutualInfo_original = self.mutualInformation(position_binned,calcium_signal_binned_signal,nbins_pos,self.nbins_cal)
         
-        mutualInfo_permutation = self.get_perm_distribution(position_binned,calcium_signal_binned_signal,self.nbins_pos,self.nbins_cal,self.num_cores,self.num_surrogates)
+        mutualInfo_permutation = self.get_perm_distribution(position_binned,calcium_signal_binned_signal,nbins_pos,self.nbins_cal,self.num_cores,self.num_surrogates)
 
         mutualInfo_zscored = self.get_mutualInfo_zscore(mutualInfo_original,mutualInfo_permutation)
         
-        calcium_mean_occupancy,calcium_mean_occupancy_smoothed,position_occupancy,visits_occupancy,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc = self.placeField(mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,track_timevector_valid,self.mean_video_srate,self.mintimespent,self.minvisits,self.placefield_nbins_pos_x,self.placefield_nbins_pos_y)
         
+        
+        x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc = self.get_position_grid(x_coordinates,y_coordinates,self.placefield_nbins_pos_x,self.placefield_nbins_pos_y)
+        
+        position_occupancy = self.get_occupancy(x_coordinates,y_coordinates,x_grid_pc,y_grid_pc,self.mean_video_srate)
+        
+        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior,x_coordinates,y_coordinates,x_grid_pc,y_grid_pc)
+        
+        visits_occupancy = self.get_visits(x_coordinates,y_coordinates,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc)
+        
+        calcium_mean_occupancy,calcium_mean_occupancy_smoothed = self.placeField(calcium_mean_occupancy,position_occupancy,visits_occupancy,self.mintimespent, self.minvisits)
 
         inputdict = dict()
         inputdict['signalMap'] = calcium_mean_occupancy
         inputdict['signalMapSmoothed'] = calcium_mean_occupancy_smoothed
         inputdict['ocuppancyMap'] = position_occupancy
+        inputdict['visitsMap'] = visits_occupancy
         inputdict['x_grid'] = x_grid_pc
         inputdict['y_grid'] = y_grid_pc
         inputdict['x_center_bins'] = x_center_bins_pc
@@ -206,16 +216,8 @@ class PlaceCell:
         
         return x_coordinates_valid, y_coordinates_valid, mean_calcium_to_behavior_valid, track_timevector_valid
   
-    def placeField(self,mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector,mean_video_srate,mintimespent, minvisits,placefield_nbins_pos_x,placefield_nbins_pos_y):
 
-
-        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,placefield_nbins_pos_x,placefield_nbins_pos_y)
-
-        position_occupancy = self.get_occupancy(x_coordinates,y_coordinates,x_grid,y_grid,mean_video_srate)
-
-        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior,x_coordinates,y_coordinates,x_grid,y_grid)
-
-        visits_occupancy = self.get_visits(x_coordinates,y_coordinates,x_grid,y_grid,x_center_bins,y_center_bins)
+    def placeField(self,calcium_mean_occupancy,position_occupancy,visits_occupancy,mintimespent, minvisits):
 
 
         Valid=(position_occupancy>=mintimespent)*(visits_occupancy>=minvisits)*1.
@@ -226,7 +228,7 @@ class PlaceCell:
         calcium_mean_occupancy_to_smooth[np.isnan(calcium_mean_occupancy_to_smooth)] = 0 
         calcium_mean_occupancy_smoothed = hf.gaussian_smooth_2d(calcium_mean_occupancy_to_smooth,2)
 
-        return calcium_mean_occupancy,calcium_mean_occupancy_smoothed,position_occupancy,visits_occupancy,x_grid,y_grid,x_center_bins,y_center_bins
+        return calcium_mean_occupancy,calcium_mean_occupancy_smoothed
 
 
 
