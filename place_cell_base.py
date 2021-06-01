@@ -55,31 +55,36 @@ class PlaceCell:
 
         x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,self.nbins_pos_x,self.nbins_pos_y)
 
-        position_binned = self.get_binned_2Dposition(x_coordinates_valid,y_coordinates_valid,self.nbins_pos_x,self.nbins_pos_y)
+        position_binned = self.get_binned_2Dposition(x_coordinates_valid,y_coordinates_valid,x_grid,y_grid)
 
         nbins_pos = self.nbins_pos_x*self.nbins_pos_y
         
-        mutualInfo_original = self.mutualInformation(position_binned,calcium_signal_binned_signal,nbins_pos,self.nbins_cal)
+        entropy1 = self.get_entropy(position_binned,nbins_pos)
         
-        mutualInfo_permutation = self.get_perm_distribution(position_binned,calcium_signal_binned_signal,nbins_pos,self.nbins_cal,self.num_cores,self.num_surrogates)
+        entropy2 = self.get_entropy(calcium_signal_binned_signal,self.nbins_cal)
+        
+        joint_entropy = self.get_joint_entropy(position_binned,calcium_signal_binned_signal,nbins_pos,self.nbins_cal)
+        
+        mutualInfo_original = self.mutualInformation(entropy1,entropy2,joint_entropy)
+        
+        mutualInfo_permutation = self.parallelize_surrogate(position_binned,calcium_signal_binned_signal,nbins_pos,self.nbins_cal,self.num_cores,self.num_surrogates)
 
         mutualInfo_zscored = self.get_mutualInfo_zscore(mutualInfo_original,mutualInfo_permutation)
         
+        x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc = self.get_position_grid(x_coordinates_valid,y_coordinates_valid,self.placefield_nbins_pos_x,self.placefield_nbins_pos_y)
         
+        position_occupancy = self.get_occupancy(x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc,self.mean_video_srate)
         
-        x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc = self.get_position_grid(x_coordinates,y_coordinates,self.placefield_nbins_pos_x,self.placefield_nbins_pos_y)
+        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc)
         
-        position_occupancy = self.get_occupancy(x_coordinates,y_coordinates,x_grid_pc,y_grid_pc,self.mean_video_srate)
+        visits_occupancy = self.get_visits(x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc)
         
-        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior,x_coordinates,y_coordinates,x_grid_pc,y_grid_pc)
-        
-        visits_occupancy = self.get_visits(x_coordinates,y_coordinates,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc)
-        
-        calcium_mean_occupancy,calcium_mean_occupancy_smoothed = self.placeField(calcium_mean_occupancy,position_occupancy,visits_occupancy,self.mintimespent, self.minvisits)
+        place_field,place_field_smoothed = self.placeField(calcium_mean_occupancy,position_occupancy,visits_occupancy,self.mintimespent, self.minvisits)
 
         inputdict = dict()
         inputdict['signalMap'] = calcium_mean_occupancy
-        inputdict['signalMapSmoothed'] = calcium_mean_occupancy_smoothed
+        inputdict['place_field'] = place_field
+        inputdict['place_field_smoothed'] = place_field_smoothed        
         inputdict['ocuppancyMap'] = position_occupancy
         inputdict['visitsMap'] = visits_occupancy
         inputdict['x_grid'] = x_grid_pc
@@ -129,8 +134,8 @@ class PlaceCell:
         y_grid_window = y_range/nbins_pos_y
         y_grid = np.arange(np.nanmin(y_coordinates),np.nanmax(y_coordinates)+y_grid_window/2,y_grid_window)
 
-        x_center_bins = x_grid + x_grid_window/2
-        y_center_bins = y_grid + y_grid_window/2
+        x_center_bins = x_grid[0:-1] + x_grid_window/2
+        y_center_bins = y_grid[0:-1] + y_grid_window/2
 
         return x_grid,y_grid,x_center_bins,y_center_bins
 
@@ -231,10 +236,8 @@ class PlaceCell:
         return calcium_mean_occupancy,calcium_mean_occupancy_smoothed
 
 
+    def get_binned_2Dposition(self,x_coordinates,y_coordinates,x_grid,y_grid):
 
-    def get_binned_2Dposition(self,x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y):
-
-        x_grid,y_grid,x_center_bins,y_center_bins = self.get_position_grid(x_coordinates,y_coordinates,nbins_pos_x,nbins_pos_y)
 
         # calculate position occupancy
         position_binned = np.zeros(x_coordinates.shape) 
@@ -263,12 +266,9 @@ class PlaceCell:
 
         return calcium_signal_binned_signal
 
-
-    def mutualInformation(self,bin_vector1,bin_vector2,nbins_1,nbins_2):
+    def mutualInformation(self,entropy1,entropy2,joint_entropy):
         eps = np.finfo(float).eps
 
-        entropy1 = self.get_entropy(bin_vector1,nbins_1)
-        entropy2 = self.get_entropy(bin_vector2,nbins_2)
 
     #     this part here could be done using this code instead. I will leave both for clarity
     #     nbins_pos = 100
@@ -279,7 +279,6 @@ class PlaceCell:
     #     edges2 = np.linspace(np.nanmin(calcium_signal_binned_signal),np.nanmax(calcium_signal_binned_signal),nbins_cal+1)
     #     bin_vector2 = np.digitize(calcium_signal_binned_signal,edges2)-1
 
-        joint_entropy = self.get_joint_entropy(bin_vector1,bin_vector2,nbins_1,nbins_2)
         mutualInfo = entropy1 + entropy2 - joint_entropy
 
         return mutualInfo
@@ -288,11 +287,7 @@ class PlaceCell:
         mutualInfo_zscored = (mutualInfo_original-np.nanmean(mutualInfo_permutation))/np.nanstd(mutualInfo_permutation)
         return mutualInfo_zscored
 
-    def get_perm_distribution(self,bin_vector1,bin_vector2,nbins_1,nbins_2,num_cores,num_surrogates):
-        
-        results = Parallel(n_jobs=num_cores)(delayed(self.get_surrogate)(bin_vector1,bin_vector2,nbins_1,nbins_2,permi) for permi in range(num_surrogates))
-        
-        return np.array(results)
+
     
     def get_joint_entropy(self,bin_vector1,bin_vector2,nbins_1,nbins_2):
 
@@ -324,25 +319,39 @@ class PlaceCell:
 
         return entropy
 
+    def gen_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,permi):
+        
+        
+        bin_vector_shuffled = self.get_surrogate(bin_vector2,permi)
+        entropy1 = self.get_entropy(bin_vector1,nbins_1)
+        entropy2 = self.get_entropy(bin_vector_shuffled,nbins_2)
+        joint_entropy = self.get_joint_entropy(bin_vector1,bin_vector_shuffled,nbins_1,nbins_2)
+        mutualInfo = self.mutualInformation(entropy1,entropy2,joint_entropy)
+        
+        
+        return mutualInfo
     
-    def get_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,permi):
+    
+    def parallelize_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,num_cores,num_surrogates):
+        
+        results = Parallel(n_jobs=num_cores)(delayed(self.gen_surrogate)(bin_vector1,bin_vector2,nbins_1,nbins_2,permi) for permi in range(num_surrogates))
+        
+        return np.array(results)
+    
+    def get_surrogate(self,input_vector,permi):
         eps = np.finfo(float).eps
 
-        bin_vector_shuffled = []
-        I_break = np.random.choice(np.arange(int(bin_vector2.shape[0]*0.1),int(bin_vector2.shape[0]*0.9)),1)[0].astype(int)
+        input_vector_shuffled = []
+        I_break = np.random.choice(np.arange(int(input_vector.shape[0]*0.1),int(input_vector.shape[0]*0.9)),1)[0].astype(int)
 
         if np.mod(permi,4) == 0:
-            bin_vector_shuffled = np.concatenate([bin_vector2[I_break:], bin_vector2[0:I_break]])
+            input_vector_shuffled = np.concatenate([input_vector[I_break:], input_vector[0:I_break]])
         elif np.mod(permi,4) == 1:
-            bin_vector_shuffled = np.concatenate([bin_vector2[:I_break:-1], bin_vector2[0:I_break+1]])
+            input_vector_shuffled = np.concatenate([input_vector[:I_break:-1], input_vector[0:I_break+1]])
         elif np.mod(permi,4) == 2:
-            bin_vector_shuffled = np.concatenate([bin_vector2[I_break:], bin_vector2[I_break-1::-1]])
+            input_vector_shuffled = np.concatenate([input_vector[I_break:], input_vector[I_break-1::-1]])
         else:   
-            bin_vector_shuffled = np.concatenate([bin_vector2[I_break:], bin_vector2[0:I_break]])
-            bin_vector_shuffled = bin_vector_shuffled[::-1]
+            input_vector_shuffled = np.concatenate([input_vector[I_break:], input_vector[0:I_break]])
+            input_vector_shuffled = input_vector_shuffled[::-1]
 
-
-        mutualInfo = self.mutualInformation(bin_vector1,bin_vector_shuffled,nbins_1,nbins_2)
-
-
-        return mutualInfo
+        return input_vector_shuffled
