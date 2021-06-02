@@ -80,7 +80,8 @@ class PlaceCell:
         visits_occupancy = self.get_visits(x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc)
         
         place_field,place_field_smoothed = self.placeField(calcium_mean_occupancy,position_occupancy,visits_occupancy,self.mintimespent, self.minvisits)
-
+        sparsity = self.get_sparsity(place_field_smoothed,position_occupancy)
+        
         inputdict = dict()
         inputdict['signalMap'] = calcium_mean_occupancy
         inputdict['place_field'] = place_field
@@ -96,7 +97,8 @@ class PlaceCell:
         inputdict['mutualInfo_original'] = mutualInfo_original
         inputdict['mutualInfo_zscored'] = mutualInfo_zscored
         inputdict['mutualInfo_permutation'] = mutualInfo_permutation
-
+        inputdict['sparsity'] = sparsity
+        
         self.caller_saving(inputdict,self.saving)
 
         return inputdict
@@ -113,7 +115,14 @@ class PlaceCell:
         else:
             print('File not saved!')
 
+    def get_sparsity(self,place_field,position_occupancy):
+        
+        position_occupancy_norm = np.nansum(position_occupancy/np.nansum(position_occupancy))
+        sparsity = np.nanmean(position_occupancy_norm*place_field)**2/np.nanmean(position_occupancy_norm*place_field**2)
 
+        
+        return sparsity
+    
     def get_speed(self,x_coordinates,y_coordinates,track_timevector):
 
         speed = np.sqrt(np.diff(x_coordinates)**2 + np.diff(y_coordinates)**2)
