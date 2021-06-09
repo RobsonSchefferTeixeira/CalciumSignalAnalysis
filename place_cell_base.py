@@ -31,7 +31,9 @@ class PlaceCell:
         kwargs.setdefault('saving', False)  
         kwargs.setdefault('saving_string', [])             
 
-        valid_kwargs = ['RatSession','day','ch','dataset', 'mean_video_srate','mintimespent', 'minvisits', 'speed_threshold', 'nbins_pos_x', 'nbins_pos_y',                                 'nbins_cal', 'placefield_nbins_pos_x','placefield_nbins_pos_y','num_cores','num_surrogates','saving_path','saving','saving_string']
+        valid_kwargs = ['RatSession','day','ch','dataset', 'mean_video_srate','mintimespent','minvisits','speed_threshold',
+                        'nbins_pos_x','nbins_pos_y','nbins_cal','placefield_nbins_pos_x','placefield_nbins_pos_y','num_cores',
+                        'num_surrogates','saving_path','saving','saving_string']
         
         for k, v in kwargs.items():
             if k not in valid_kwargs:
