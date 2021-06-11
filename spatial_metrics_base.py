@@ -27,7 +27,7 @@ class PlaceCell:
         kwargs.setdefault('placefield_nbins_pos_y', 50)  
         kwargs.setdefault('num_cores', 1)  
         kwargs.setdefault('num_surrogates', 200)          
-        kwargs.setdefault('saving_path', [])  
+        kwargs.setdefault('saving_path', os.getcwd())  
         kwargs.setdefault('saving', False)  
         kwargs.setdefault('saving_string', [])             
 
@@ -39,17 +39,14 @@ class PlaceCell:
             if k not in valid_kwargs:
                 raise TypeError("Invalid keyword argument %s" % k)
             setattr(self, k, v)
-
+            
+        self.__dict__['input_parameters'] = kwargs
         
-    def run_placeMetrics(self,mean_calcium_to_behavior,track_timevector,x_coordinates,y_coordinates):
+    def main(self,mean_calcium_to_behavior,track_timevector,x_coordinates,y_coordinates):
 
-        self.mean_calcium_to_behavior = mean_calcium_to_behavior
-        self.track_timevector = track_timevector
-        self.x_coordinates = x_coordinates
-        self.y_coordinates = y_coordinates
-        self.speed = self.get_speed(self.x_coordinates,self.y_coordinates,self.track_timevector)
+        speed = self.get_speed(x_coordinates,y_coordinates,track_timevector)
         
-        I_peaks = dp.detect_peaks(self.mean_calcium_to_behavior,mpd=0.5*self.mean_video_srate,mph=1.*np.nanstd(self.mean_calcium_to_behavior))
+        I_peaks = dp.detect_peaks(mean_calcium_to_behavior,mpd=0.5*self.mean_video_srate,mph=1.*np.nanstd(mean_calcium_to_behavior))
 
         x_coordinates_valid, y_coordinates_valid, mean_calcium_to_behavior_valid, track_timevector_valid = self.get_valid_timepoints(mean_calcium_to_behavior,x_coordinates,y_coordinates,track_timevector,self.speed_threshold)
 
@@ -82,8 +79,19 @@ class PlaceCell:
         visits_occupancy = self.get_visits(x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc)
         
         place_field,place_field_smoothed = self.placeField(calcium_mean_occupancy,position_occupancy,visits_occupancy,self.mintimespent, self.minvisits)
-        sparsity = self.get_sparsity(place_field_smoothed,position_occupancy)
         
+        sparsity = self.get_sparsity(place_field_smoothed,position_occupancy)
+
+        matrix_output = self.get_grid_spatial_autocorrelation(place_field_smoothed)
+
+        gridness = self.get_gridness_index(matrix_output)
+
+
+        surrogate_distribution = self.parallelize_grid_surrogate(mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,
+                                                                 self.placefield_nbins_pos_x,self.placefield_nbins_pos_y,
+                                                                 self.mean_video_srate,self.mintimespent,self.minvisits,self.num_cores,self.num_surrogates)
+        
+
         inputdict = dict()
         inputdict['signalMap'] = calcium_mean_occupancy
         inputdict['place_field'] = place_field
@@ -100,22 +108,29 @@ class PlaceCell:
         inputdict['mutualInfo_zscored'] = mutualInfo_zscored
         inputdict['mutualInfo_permutation'] = mutualInfo_permutation
         inputdict['sparsity'] = sparsity
+        inputdict['surrogate_distribution'] = surrogate_distribution
+        inputdict['gridness'] = gridness
         
-        self.caller_saving(inputdict,self.saving)
+        if self.saving == True:
+            filename = self.RatSession + '.' + self.saving_string + '.PlaceField.ModulationIndex.' + self.dataset + '.Day' + str(self.day) + '.Ch.' + str(self.ch)
+            self.caller_saving(inputdict,filename,self.saving_path)
 
-        return inputdict
-
-
-    def caller_saving(self,inputdict,saving):
-        if saving == True:
-            print('Saving file...')
-            os.chdir(saving_path)
-            filename = RatSession + '.' + saving_string + '.PlaceField.ModulationIndex.' + dataset + '.Day' + str(day) + '.Ch.' + str(ch)
-            output = open(filename, 'wb') 
-            np.save(output,inputdict)
-            output.close()
+            filename = self.RatSession + '.' + self.saving_string + '.PlaceField.Parameters.' + self.dataset + '.Day' + str(self.day) + '.Ch.' + str(self.ch)
+            self.caller_saving(self.__dict__['input_parameters'],filename,self.saving_path)
         else:
             print('File not saved!')
+        
+        
+        return inputdict
+
+            
+    def caller_saving(self,inputdict,filename,saving_path):
+        print('Saving data file...')
+        os.chdir(saving_path)
+        output = open(filename, 'wb') 
+        np.save(output,inputdict)
+        output.close()
+     
 
     def get_sparsity(self,place_field,position_occupancy):
         
@@ -330,7 +345,7 @@ class PlaceCell:
 
         return entropy
 
-    def gen_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,permi):
+    def get_mutual_info_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,permi):
         
         
         bin_vector_shuffled = self.get_surrogate(bin_vector2,permi)
@@ -342,12 +357,15 @@ class PlaceCell:
         
         return mutualInfo
     
-    
     def parallelize_surrogate(self,bin_vector1,bin_vector2,nbins_1,nbins_2,num_cores,num_surrogates):
         
-        results = Parallel(n_jobs=num_cores)(delayed(self.gen_surrogate)(bin_vector1,bin_vector2,nbins_1,nbins_2,permi) for permi in range(num_surrogates))
+        results = Parallel(n_jobs=num_cores)(delayed(self.get_mutual_info_surrogate)(bin_vector1,bin_vector2,nbins_1,nbins_2,permi) for permi in range(num_surrogates))
         
         return np.array(results)
+    
+
+    
+    
     
     def get_surrogate(self,input_vector,permi):
         eps = np.finfo(float).eps
@@ -366,3 +384,116 @@ class PlaceCell:
             input_vector_shuffled = input_vector_shuffled[::-1]
 
         return input_vector_shuffled
+
+    
+
+    def parallelize_grid_surrogate(self,mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,placefield_nbins_pos_x,placefield_nbins_pos_y,
+                              mean_video_srate,mintimespent,minvisits,num_cores,num_surrogates):
+        
+        results = Parallel(n_jobs=num_cores)(delayed(self.get_spatial_surrogate)(mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,placefield_nbins_pos_x,placefield_nbins_pos_y,
+                              mean_video_srate,mintimespent,minvisits,permi) for permi in range(num_surrogates))
+        
+        return np.array(results)
+    
+    def get_spatial_surrogate(self,mean_calcium_to_behavior_valid,x_coordinates_valid,y_coordinates_valid,placefield_nbins_pos_x,placefield_nbins_pos_y,
+                              mean_video_srate,mintimespent,minvisits,permi):
+        
+        mean_calcium_to_behavior_valid_shuffled = self.get_surrogate(mean_calcium_to_behavior_valid,permi)
+        
+        x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc = self.get_position_grid(x_coordinates_valid,y_coordinates_valid,placefield_nbins_pos_x,
+                                                                                       placefield_nbins_pos_y)
+        
+        position_occupancy = self.get_occupancy(x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc,mean_video_srate)
+        
+        calcium_mean_occupancy = self.get_calcium_occupancy(mean_calcium_to_behavior_valid_shuffled,x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc)
+        
+        visits_occupancy = self.get_visits(x_coordinates_valid,y_coordinates_valid,x_grid_pc,y_grid_pc,x_center_bins_pc,y_center_bins_pc)
+        
+        place_field,place_field_smoothed = self.placeField(calcium_mean_occupancy,position_occupancy,visits_occupancy,mintimespent, minvisits)
+        
+        matrix_output = self.get_grid_spatial_autocorrelation(place_field_smoothed)
+        
+        gridness = self.get_gridness_index(matrix_output)
+        
+        return gridness
+    
+    
+    
+    def get_gridness_index(self,array_output):
+
+        from scipy.ndimage.interpolation import rotate
+
+
+        array_output_zeroed = np.copy(array_output)
+        array_output_zeroed[np.isnan(array_output_zeroed)] = 0
+        autoCorr = np.copy(array_output_zeroed)
+        da = 3
+        angles = list(range(0, 180+da, da))
+        crossCorr = []
+        # Rotate and compute correlation coefficient
+        for angle in angles:
+            autoCorrRot = rotate(autoCorr, angle, reshape=False)
+            C = np.corrcoef(np.reshape(autoCorr, (1, autoCorr.size)),
+                np.reshape(autoCorrRot, (1, autoCorrRot.size)))
+            crossCorr.append(C[0, 1])
+
+        max_angles_i = (np.array([30, 90, 150]) / da).astype(int)
+        min_angles_i = (np.array([60, 120]) / da).astype(int)
+
+        maxima = np.max(np.array(crossCorr)[max_angles_i])
+        minima = np.min(np.array(crossCorr)[min_angles_i])
+        gridness = minima - maxima
+        return gridness
+
+    
+    
+    def get_grid_spatial_autocorrelation(self,input_matrix):
+
+        matrix_image = input_matrix.copy()
+        kernel = input_matrix.copy()
+
+        [ma,na] = np.shape(matrix_image)
+        [mb,nb] = np.shape(kernel)
+
+        mc = np.max([ma+mb-1,ma,mb])
+        nc = np.max([na+nb-1,na,nb])
+
+        matrix_output = np.nan*np.zeros([mc,nc])
+
+        i_size = kernel.shape[0]
+        j_size = kernel.shape[1]
+
+        kernel_size_i,kernel_size_j = np.shape(kernel)
+        matrix_image_size = np.array(np.shape(matrix_image));
+
+        output_matrix_size = matrix_image_size + [2*i_size-1, 2*j_size-1];
+        work_mat = np.nan * np.zeros(output_matrix_size);
+        work_mat[(kernel_size_i):(kernel_size_i+matrix_image_size[0]),(kernel_size_j):(kernel_size_j+matrix_image_size[1])] = matrix_image
+
+        for i in range(np.shape(matrix_output)[0]):
+            for j in range(np.shape(matrix_output)[1]):
+
+                win1 = np.arange(i,kernel_size_i+i).astype(int)
+                win2 = np.arange(j,kernel_size_j+j).astype(int)
+
+                matrix_sliced = work_mat[win1,:][:,win2]; 
+                matrix_sliced_kernel = matrix_sliced*kernel;                                             
+                keep = ~np.isnan(matrix_sliced_kernel)
+
+                n = np.sum(keep);
+
+                if n < 20:
+                    matrix_output[i,j] = np.nan;
+
+                else:
+
+                    sum_matrix_kernel_x_lagged = np.sum(matrix_sliced_kernel[keep]);
+                    sum_matrix_lagged =   np.sum(matrix_sliced[keep]);
+                    sum_matrix_kernel =   np.sum(kernel[keep]);
+                    sum_matrix_lagged_2 =  np.sum(matrix_sliced[keep]**2);
+                    sum_matrix_kernel_2 =  np.sum(kernel[keep]**2);
+
+                    matrix_output[i,j] = (n*sum_matrix_kernel_x_lagged - sum_matrix_kernel*sum_matrix_lagged) / (np.sqrt(n*sum_matrix_kernel_2-sum_matrix_kernel**2) * np.sqrt(n*sum_matrix_lagged_2-sum_matrix_lagged**2));
+
+        return matrix_output
+
